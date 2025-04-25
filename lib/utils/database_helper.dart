@@ -3,11 +3,12 @@ import 'package:sqflite/sqflite.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart';
 import 'dart:io';
-import 'package:flutter/foundation.dart';
 import 'package:tickiting/models/user.dart';
 import 'package:tickiting/models/bus.dart';
 import 'package:tickiting/models/booking.dart';
-import 'package:tickiting/models/ticket.dart';
+import 'dart:math';
+//import 'package:tickiting/utils/email_helper.dart';
+import 'dart:developer';
 
 class DatabaseHelper {
   static final DatabaseHelper _instance = DatabaseHelper._internal();
@@ -37,7 +38,7 @@ class DatabaseHelper {
   }
 
   Future<void> _onCreate(Database db, int version) async {
-    // Create users table with is_admin field
+    // Create users table
     await db.execute('''
       CREATE TABLE users(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -46,9 +47,6 @@ class DatabaseHelper {
         password TEXT NOT NULL,
         phone TEXT NOT NULL,
         gender TEXT NOT NULL,
-        is_admin INTEGER DEFAULT 0,
-        is_default_admin INTEGER DEFAULT 0,
-        is_active INTEGER DEFAULT 1,
         created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
       )
     ''');
@@ -125,22 +123,6 @@ class DatabaseHelper {
     await _insertInitialData(db);
   }
 
-  Future<int> createBooking(Ticket ticket) async {
-    final db = await database;
-
-    return await db.insert('bookings', {
-      'bus_id': ticket.busName,
-      'from_location': ticket.from,
-      'to_location': ticket.to,
-      'travel_date': ticket.date.toIso8601String(),
-      'passengers': ticket.passengers,
-      'seat_numbers': ticket.seatNumbers.join(','),
-      'booking_status': ticket.status,
-      'user_id': ticket.userId, // Pass the userId explicitly from the Ticket object
-      'created_at': DateTime.now().toIso8601String(),
-    });
-  }
-
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
     if (oldVersion < 2) {
       // Add notifications table if upgrading from version 1
@@ -178,9 +160,9 @@ class DatabaseHelper {
           'to_location': 'Butare',
         });
 
-        debugPrint("Added route information columns to buses table");
+        print("Added route information columns to buses table");
       } catch (e) {
-        debugPrint("Error adding route information columns: $e");
+        print("Error adding route information columns: $e");
       }
     }
     if (oldVersion < 4) {
@@ -200,9 +182,9 @@ class DatabaseHelper {
           FOREIGN KEY(user_id) REFERENCES users(id)
         )
       ''');
-        debugPrint("Added reset_tokens table");
+        print("Added reset_tokens table");
       } catch (e) {
-        debugPrint("Error adding reset_tokens table: $e");
+        print("Error adding reset_tokens table: $e");
       }
     }
   }
@@ -214,9 +196,10 @@ class DatabaseHelper {
       );
     } catch (e) {
       // Column might already exist
-      debugPrint("Error adding notification_sent column: $e");
+      print("Error adding notification_sent column: ${e.toString()}");
     }
   }
+  // Add this method to the DatabaseHelper class in lib/utils/database_helper.dart
 
   Future<void> ensureRouteColumnsExistV2() async {
     final db = await database;
@@ -232,20 +215,20 @@ class DatabaseHelper {
       );
 
       if (!hasFromColumn || !hasToColumn) {
-        debugPrint("Route columns missing - adding them now");
+        print("Route columns missing - adding them now");
 
         if (!hasFromColumn) {
           await db.execute(
             "ALTER TABLE buses ADD COLUMN from_location TEXT DEFAULT 'Kigali'",
           );
-          debugPrint("Added from_location column to buses table");
+          print("Added from_location column to buses table");
         }
 
         if (!hasToColumn) {
           await db.execute(
             "ALTER TABLE buses ADD COLUMN to_location TEXT DEFAULT 'Butare'",
           );
-          debugPrint("Added to_location column to buses table");
+          print("Added to_location column to buses table");
         }
 
         // Update existing buses with default values
@@ -254,10 +237,10 @@ class DatabaseHelper {
           'to_location': 'Butare',
         }, where: "from_location IS NULL OR to_location IS NULL");
 
-        debugPrint("Updated existing bus records with default route values");
+        print("Updated existing bus records with default route values");
       }
     } catch (e) {
-      debugPrint("Error ensuring route columns: $e");
+      print("Error ensuring route columns: $e");
       // Try recreating the table if altering fails
       try {
         // Get current buses
@@ -276,6 +259,8 @@ class DatabaseHelper {
           available_seats INTEGER NOT NULL,
           bus_type TEXT NOT NULL,
           features TEXT NOT NULL,
+          // Continuing from where the code was cut off in the ensureRouteColumnsExist() method
+
           from_location TEXT NOT NULL DEFAULT 'Kigali',
           to_location TEXT NOT NULL DEFAULT 'Butare'
         )
@@ -305,17 +290,17 @@ class DatabaseHelper {
         await db.execute("DROP TABLE buses");
         await db.execute("ALTER TABLE buses_new RENAME TO buses");
 
-        debugPrint("Recreated buses table with route columns");
+        print("Recreated buses table with route columns");
       } catch (e) {
-        debugPrint("Error recreating buses table: $e");
+        print("Error recreating buses table: $e");
         // Last resort: force database recreation
         try {
-          debugPrint(
+          print(
             "Attempting to force database version update to trigger recreation",
           );
           await db.rawQuery("PRAGMA user_version = 3");
         } catch (e) {
-          debugPrint("Failed to update database version: $e");
+          print("Failed to update database version: $e");
         }
       }
     }
@@ -335,20 +320,20 @@ class DatabaseHelper {
       );
 
       if (!hasFromColumn || !hasToColumn) {
-        debugPrint("Route columns missing - adding them now");
+        print("Route columns missing - adding them now");
 
         if (!hasFromColumn) {
           await db.execute(
             "ALTER TABLE buses ADD COLUMN from_location TEXT DEFAULT 'Kigali'",
           );
-          debugPrint("Added from_location column to buses table");
+          print("Added from_location column to buses table");
         }
 
         if (!hasToColumn) {
           await db.execute(
             "ALTER TABLE buses ADD COLUMN to_location TEXT DEFAULT 'Butare'",
           );
-          debugPrint("Added to_location column to buses table");
+          print("Added to_location column to buses table");
         }
 
         // Update existing buses with default values
@@ -357,10 +342,10 @@ class DatabaseHelper {
           'to_location': 'Butare',
         }, where: "from_location IS NULL OR to_location IS NULL");
 
-        debugPrint("Updated existing bus records with default route values");
+        print("Updated existing bus records with default route values");
       }
     } catch (e) {
-      debugPrint("Error ensuring route columns: $e");
+      print("Error ensuring route columns: $e");
       // Try recreating the table if altering fails
       try {
         // Get current buses
@@ -408,44 +393,32 @@ class DatabaseHelper {
         await db.execute("DROP TABLE buses");
         await db.execute("ALTER TABLE buses_new RENAME TO buses");
 
-        debugPrint("Recreated buses table with route columns");
+        print("Recreated buses table with route columns");
       } catch (e) {
-        debugPrint("Error recreating buses table: $e");
+        print("Error recreating buses table: $e");
         // Last resort: force database recreation
         try {
-          debugPrint(
+          print(
             "Attempting to force database version update to trigger recreation",
           );
           await db.rawQuery("PRAGMA user_version = 3");
         } catch (e) {
-          debugPrint("Failed to update database version: $e");
+          print("Failed to update database version: $e");
         }
       }
     }
   }
 
   Future<void> _insertInitialData(Database db) async {
-    // Check if admin user already exists
-    final adminExists = await db.query(
-      'users',
-      where: 'email = ?',
-      whereArgs: ['admin@rwandabus.com'],
-    );
+    // Insert admin user with a better name than "Admin User"
+    await db.insert('users', {
+      'name': 'System Administrator',
+      'email': 'admin@rwandabus.com',
+      'password': 'admin123', // In a real app, this would be hashed
+      'phone': '+250 789 123 456',
+      'gender': 'Male',
+    });
 
-    if (adminExists.isEmpty) {
-      // Only insert if admin doesn't exist, and mark as admin
-      await db.insert('users', {
-        'name': 'System Administrator',
-        'email': 'admin@rwandabus.com',
-        'password': 'admin123',
-        'phone': '+250 789 123 456',
-        'gender': 'Male',
-        'is_admin': 1, // Mark as admin
-        'is_default_admin': 1, // Mark as default admin
-        'created_at': DateTime.now().toIso8601String(),
-      });
-    }
-    
     // Insert some sample buses with route information
     await db.insert('buses', {
       'id': 'BUS001',
@@ -529,7 +502,7 @@ class DatabaseHelper {
 
     // If no real users, we need to at least fix the admin user name
     if (realUsers.isEmpty) {
-      debugPrint("No real users found to replace 'Admin User'");
+      print("No real users found to replace 'Admin User'");
 
       // Update admin user name to prevent future issues
       await db.update(
@@ -544,7 +517,7 @@ class DatabaseHelper {
         "UPDATE notifications SET message = REPLACE(message, 'Admin User', 'System Administrator')",
       );
 
-      debugPrint(
+      print(
         "Updated $count notifications to use 'System Administrator' instead of 'Admin User'",
       );
       return;
@@ -560,11 +533,11 @@ class DatabaseHelper {
         [replacementName],
       );
 
-      debugPrint(
+      print(
         "Updated $count notifications to use '$replacementName' instead of 'Admin User'",
       );
     } catch (e) {
-      debugPrint("Error replacing Admin User in notifications: $e");
+      print("Error replacing Admin User in notifications: $e");
     }
 
     // Also update the admin user's name to prevent future occurrences
@@ -575,14 +548,17 @@ class DatabaseHelper {
         where: 'name = ? AND email = ?',
         whereArgs: ['Admin User', 'admin@rwandabus.com'],
       );
-      debugPrint("Updated admin user name to 'System Administrator'");
+      print("Updated admin user name to 'System Administrator'");
     } catch (e) {
-      debugPrint("Error updating admin user name: $e");
+      print("Error updating admin user name: $e");
     }
   }
 
   // Method to update notification message
-  Future<int> updateNotificationMessage(int notificationId, String newMessage) async {
+  Future<int> updateNotificationMessage(
+    int notificationId,
+    String newMessage,
+  ) async {
     final db = await database;
     return await db.update(
       'notifications',
@@ -630,198 +606,6 @@ class DatabaseHelper {
     return null;
   }
 
-  Future<int> updateUserStatus(int userId, bool isActive) async {
-    await _ensureUserStatusColumn();
-    final db = await database;
-    
-    return await db.update(
-      'users',
-      {'is_active': isActive ? 1 : 0},
-      where: 'id = ?',
-      whereArgs: [userId],
-    );
-  }
-
-  // Get booking details by ID
-  Future<Map<String, dynamic>?> getBookingById(String bookingId) async {
-    final db = await database;
-    
-    const query = '''
-      SELECT 
-        b.*,
-        CASE 
-          WHEN u.is_default_admin = 1 THEN 'Customer'
-          ELSE u.name
-        END as user_name,
-        CASE 
-          WHEN u.is_default_admin = 1 THEN 'customer@example.com'
-          ELSE u.email
-        END as user_email,
-        CASE 
-          WHEN u.is_default_admin = 1 THEN '+250 XXX XXX XXX'
-          ELSE u.phone
-        END as user_phone
-      FROM bookings b
-      LEFT JOIN users u ON b.user_id = u.id
-      WHERE b.id = ?
-    ''';
-    
-    final List<Map<String, dynamic>> results = await db.rawQuery(query, [bookingId]);
-    
-    if (results.isNotEmpty) {
-      return results.first;
-    }
-    return null;
-  }
-
-  // Admin functions to approve a booking
-  Future<int> approveBooking(String bookingId) async {
-    // Update both booking and payment status
-    Database db = await database;
-    
-    // First update the booking status
-    final bookingResult = await db.update(
-      'bookings',
-      {'booking_status': 'Confirmed'},
-      where: 'id = ?',
-      whereArgs: [bookingId],
-    );
-    
-    // Then update the payment status
-    final paymentResult = await db.update(
-      'bookings',
-      {'payment_status': 'Confirmed'},
-      where: 'id = ?',
-      whereArgs: [bookingId],
-    );
-    
-    // Create a notification for the user
-    if (bookingResult > 0) {
-      // Get the booking to find the user
-      final booking = await getBookingById(bookingId);
-      if (booking != null) {
-        // Get route information for the notification
-        final notificationData = {
-          'title': 'Booking Confirmed',
-          'message': 'Your booking from ${booking['from_location']} to ${booking['to_location']} has been confirmed.',
-          'time': DateTime.now().toIso8601String(),
-          'isRead': 0,
-          'type': 'booking_confirmation',
-          'recipient': 'user',
-          'userId': booking['user_id'],
-        };
-        
-        await db.insert('notifications', notificationData);
-      }
-    }
-    
-    return bookingResult;
-  }
-
-  // Admin function to reject a booking
-  Future<int> rejectBooking(String bookingId, String reason) async {
-    Database db = await database;
-    
-    // Update both booking and payment status
-    final bookingResult = await db.update(
-      'bookings',
-      {'booking_status': 'Cancelled'},
-      where: 'id = ?',
-      whereArgs: [bookingId],
-    );
-    
-    await db.update(
-      'bookings',
-      {'payment_status': 'Refunded'},
-      where: 'id = ?',
-      whereArgs: [bookingId],
-    );
-    
-    // Create a notification for the user
-    if (bookingResult > 0) {
-      // Get the booking to find the user
-      final booking = await getBookingById(bookingId);
-      if (booking != null) {
-        // Get route information for the notification
-        final notificationData = {
-          'title': 'Booking Cancelled',
-          'message': 'Your booking from ${booking['from_location']} to ${booking['to_location']} has been cancelled. ${reason.isNotEmpty ? "Reason: $reason" : ""}',
-          'time': DateTime.now().toIso8601String(),
-          'isRead': 0,
-          'type': 'booking_cancellation',
-          'recipient': 'user',
-          'userId': booking['user_id'],
-        };
-        
-        await db.insert('notifications', notificationData);
-      }
-    }
-    
-    return bookingResult;
-  }
-
-  // Get the list of pending bookings for admin
-  Future<List<Booking>> getPendingBookings() async {
-    Database db = await database;
-    List<Map<String, dynamic>> maps = await db.query(
-      'bookings',
-      where: 'booking_status = ?',
-      whereArgs: ['Pending'],
-      orderBy: 'created_at DESC',
-    );
-    
-    return List.generate(maps.length, (i) {
-      return Booking.fromMap(maps[i]);
-    });
-  }
-
-  // Get bookings with user details for admin
-  Future<List<Map<String, dynamic>>> getBookingsWithUserDetails() async {
-    Database db = await database;
-    
-    // Use a JOIN query to get booking and user information together
-    const query = '''
-      SELECT b.*, u.name as user_name, u.email as user_email, u.phone as user_phone
-      FROM bookings b
-      LEFT JOIN users u ON b.user_id = u.id
-      ORDER BY b.created_at DESC
-    ''';
-    
-    final List<Map<String, dynamic>> results = await db.rawQuery(query);
-    return results;
-  }
-
-  // Get bookings with user and bus details for admin
-  Future<List<Map<String, dynamic>>> getCompleteBookingDetails() async {
-    Database db = await database;
-    
-    // Use a JOIN query to get booking, user, and bus information together
-    const query = '''
-      SELECT 
-        b.*, 
-        u.name as user_name, 
-        u.email as user_email, 
-        u.phone as user_phone,
-        bs.name as bus_name,
-        bs.departure_time,
-        bs.arrival_time
-      FROM bookings b
-      LEFT JOIN users u ON b.user_id = u.id
-      LEFT JOIN buses bs ON b.bus_id = bs.id
-      ORDER BY b.created_at DESC
-    ''';
-    
-    final List<Map<String, dynamic>> results = await db.rawQuery(query);
-    return results;
-  }
-
-  Future<List<Map<String, dynamic>>> getAllUsersWithStatus() async {
-    await _ensureUserStatusColumn();
-    final db = await database;
-    
-    return await db.query('users');
-  }
-
   Future<User?> getUserByEmail(String email) async {
     Database db = await database;
     List<Map<String, dynamic>> maps = await db.query(
@@ -836,47 +620,19 @@ class DatabaseHelper {
     return null;
   }
 
-  Future<void> updateUser(User user) async {
-    final db = await database;
-    try {
-      await db.update(
-        'users',
-        user.toMap(),
-        where: 'id = ?',
-        whereArgs: [user.id],
-      );
-      debugPrint('Updated user ${user.name} (ID: ${user.id})');
-    } catch (e) {
-      debugPrint('Error updating user: $e');
-      throw e;
-    }
-  }
-
-  Future<void> _ensureUserStatusColumn() async {
-    final db = await database;
-    
-    try {
-      // Check if the is_active column exists in users table
-      var tableInfo = await db.rawQuery("PRAGMA table_info(users)");
-      bool hasColumn = tableInfo.any(
-        (column) => column['name'] == 'is_active',
-      );
-
-      if (!hasColumn) {
-        // Add the is_active column with default value 1 (true/active)
-        await db.execute("ALTER TABLE users ADD COLUMN is_active INTEGER DEFAULT 1");
-        debugPrint("Added is_active column to users table");
-      }
-    } catch (e) {
-      debugPrint("Error ensuring user status column: $e");
-    }
+  Future<int> updateUser(User user) async {
+    Database db = await database;
+    return await db.update(
+      'users',
+      user.toMap(),
+      where: 'id = ?',
+      whereArgs: [user.id],
+    );
   }
 
   Future<List<User>> getAllUsers() async {
-    await _ensureUserStatusColumn();
     Database db = await database;
     List<Map<String, dynamic>> maps = await db.query('users');
-    
     return List.generate(maps.length, (i) {
       User user = User.fromMap(maps[i]);
       // You could add the status to the User model if needed
@@ -1015,24 +771,17 @@ class DatabaseHelper {
   }
 
   Future<User?> getUserById(int userId) async {
-    final db = await database;
-    try {
-      final List<Map<String, dynamic>> maps = await db.query(
-        'users',
-        where: 'id = ?',
-        whereArgs: [userId],
-      );
+    Database db = await database;
+    List<Map<String, dynamic>> maps = await db.query(
+      'users',
+      where: 'id = ?',
+      whereArgs: [userId],
+    );
 
-      if (maps.isNotEmpty) {
-        debugPrint('Found user with ID $userId: ${maps.first['name']}');
-        return User.fromMap(maps.first);
-      }
-      debugPrint('No user found with ID $userId');
-      return null;
-    } catch (e) {
-      debugPrint('Error getting user by ID: $e');
-      return null;
+    if (maps.isNotEmpty) {
+      return User.fromMap(maps.first);
     }
+    return null;
   }
 
   Future<int> updateBookingStatus(String id, String status) async {
@@ -1090,56 +839,135 @@ class DatabaseHelper {
 
   // Notification operations
   Future<int> insertNotification(Map<String, dynamic> notification) async {
-    final db = await database;
+    Database db = await database;
     return await db.insert('notifications', notification);
   }
 
-  Future<List<Map<String, dynamic>>> getNotifications(String recipient) async {
-    final db = await database;
+  Future<List<Map<String, dynamic>>> getNotifications({
+    String? recipient,
+    int? userId,
+  }) async {
+    Database db = await database;
+    String? whereClause;
+    List<dynamic>? whereArgs;
+
+    if (recipient != null && userId != null) {
+      whereClause = 'recipient = ? AND userId = ?';
+      whereArgs = [recipient, userId];
+    } else if (recipient != null) {
+      whereClause = 'recipient = ?';
+      whereArgs = [recipient];
+    } else if (userId != null) {
+      whereClause = 'userId = ?';
+      whereArgs = [userId];
+    }
+
     return await db.query(
       'notifications',
-      where: 'recipient = ?',
-      whereArgs: [recipient],
+      where: whereClause,
+      whereArgs: whereArgs,
       orderBy: 'time DESC',
     );
   }
 
-  Future<int> getUnreadNotificationsCount(String recipient) async {
-    final db = await database;
-    final result = await db.rawQuery(
-      'SELECT COUNT(*) as count FROM notifications WHERE recipient = ? AND isRead = 0',
-      [recipient],
+  Future<int> markNotificationAsRead(int id) async {
+    Database db = await database;
+    return await db.update(
+      'notifications',
+      {'isRead': 1},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  Future<int> markAllNotificationsAsRead({
+    String? recipient,
+    int? userId,
+  }) async {
+    Database db = await database;
+    String? whereClause;
+    List<dynamic>? whereArgs;
+
+    if (recipient != null && userId != null) {
+      whereClause = 'recipient = ? AND userId = ?';
+      whereArgs = [recipient, userId];
+    } else if (recipient != null) {
+      whereClause = 'recipient = ?';
+      whereArgs = [recipient];
+    } else if (userId != null) {
+      whereClause = 'userId = ?';
+      whereArgs = [userId];
+    }
+
+    return await db.update(
+      'notifications',
+      {'isRead': 1},
+      where: whereClause,
+      whereArgs: whereArgs,
+    );
+  }
+
+  Future<int> deleteNotification(int id) async {
+    Database db = await database;
+    return await db.delete('notifications', where: 'id = ?', whereArgs: [id]);
+  }
+
+  Future<int> getUnreadNotificationsCount({
+    String? recipient,
+    int? userId,
+  }) async {
+    Database db = await database;
+    String? whereClause;
+    List<dynamic>? whereArgs;
+
+    if (recipient != null && userId != null) {
+      whereClause = 'recipient = ? AND userId = ? AND isRead = ?';
+      whereArgs = [recipient, userId, 0];
+    } else if (recipient != null) {
+      whereClause = 'recipient = ? AND isRead = ?';
+      whereArgs = [recipient, 0];
+    } else if (userId != null) {
+      whereClause = 'userId = ? AND isRead = ?';
+      whereArgs = [userId, 0];
+    } else {
+      whereClause = 'isRead = ?';
+      whereArgs = [0];
+    }
+
+    List<Map<String, dynamic>> result = await db.rawQuery(
+      'SELECT COUNT(*) as count FROM notifications WHERE $whereClause',
+      whereArgs,
     );
     return Sqflite.firstIntValue(result) ?? 0;
   }
 
-  Future<void> markNotificationAsRead(int notificationId) async {
-    final db = await database;
-    await db.update(
-      'notifications',
-      {'isRead': 1},
+  // Update booking notification status
+  Future<int> updateBookingNotificationStatus(
+    String bookingId,
+    bool sent,
+  ) async {
+    Database db = await database;
+    return await db.update(
+      'bookings',
+      {'notification_sent': sent ? 1 : 0},
       where: 'id = ?',
-      whereArgs: [notificationId],
+      whereArgs: [bookingId],
     );
   }
 
-  Future<void> markAllNotificationsAsRead(String recipient) async {
+  // Add notification_sent column to bookings table if it doesn't exist
+  Future<void> addNotificationSentColumnIfNeeded() async {
     final db = await database;
-    await db.update(
-      'notifications',
-      {'isRead': 1},
-      where: 'recipient = ?',
-      whereArgs: [recipient],
-    );
-  }
 
-  Future<void> deleteNotification(int notificationId) async {
-    final db = await database;
-    await db.delete(
-      'notifications',
-      where: 'id = ?',
-      whereArgs: [notificationId],
+    // Check if the notification_sent column exists in the bookings table
+    var tableInfo = await db.rawQuery("PRAGMA table_info(bookings)");
+    bool hasColumn = tableInfo.any(
+      (column) => column['name'] == 'notification_sent',
     );
+
+    if (!hasColumn) {
+      await addNotificationSentColumnToBookings(db);
+    }
   }
 
   // Additional utility methods
@@ -1222,6 +1050,7 @@ class DatabaseHelper {
     await db.delete('notifications');
     await db.delete('users');
   }
+  // Add this method to DatabaseHelper class
 
   // Create locations table if it doesn't exist
   Future<void> _createLocationsTableIfNeeded() async {
@@ -1242,7 +1071,7 @@ class DatabaseHelper {
           )
         ''');
 
-        debugPrint("Created locations table");
+        print("Created locations table");
 
         // Insert default locations
         List<String> defaultLocations = [
@@ -1262,10 +1091,10 @@ class DatabaseHelper {
           await db.insert('locations', {'name': location});
         }
 
-        debugPrint("Inserted default locations");
+        print("Inserted default locations");
       }
     } catch (e) {
-      debugPrint("Error creating locations table: $e");
+      print("Error creating locations table: $e");
     }
   }
 
@@ -1282,7 +1111,7 @@ class DatabaseHelper {
             ConflictAlgorithm.ignore, // Skip if location already exists
       );
     } catch (e) {
-      debugPrint("Error saving location: $e");
+      print("Error saving location: $e");
       return -1;
     }
   }
@@ -1299,7 +1128,7 @@ class DatabaseHelper {
         whereArgs: [locationName],
       );
     } catch (e) {
-      debugPrint("Error deleting location: $e");
+      print("Error deleting location: $e");
       return -1;
     }
   }
@@ -1362,25 +1191,193 @@ class DatabaseHelper {
     return locationList;
   }
 
-  // Add method to check if user is admin
-  Future<bool> isAdminUser(int userId) async {
+  Future<Map<String, dynamic>> createPasswordResetToken(
+    String emailOrPhone,
+    String verificationMethod,
+  ) async {
+    Database db = await database;
+    User? user;
+
+    // Find user by email or phone
+    if (verificationMethod == 'email') {
+      if (user != null) {
+        // Ensure token is declared and assigned before use
+        final token = (Random().nextInt(900000) + 100000).toString();
+        await sendEmail(user.email, token);
+      } else {
+        print("User or email is null, cannot send email.");
+      }
+    } else {
+      // Assuming you have a method to get user by phone
+      List<Map<String, dynamic>> maps = await db.query(
+        'users',
+        where: 'phone = ?',
+        whereArgs: [emailOrPhone],
+      );
+
+      if (maps.isNotEmpty) {
+        user = User.fromMap(maps.first);
+      }
+    }
+
+    if (user == null) {
+      return {
+        'success': false,
+        'message': 'No account found with this $verificationMethod',
+      };
+    }
+
+    // Generate a 6-digit random token
+    final random = Random();
+    String token = '';
+    for (int i = 0; i < 6; i++) {
+      token += random.nextInt(10).toString();
+    }
+
+    // Set expiry time (1 hour from now)
+    final expiryTime = DateTime.now().add(Duration(hours: 1)).toIso8601String();
+
+    // Delete any existing tokens for this user
+    await db.delete('reset_tokens', where: 'user_id = ?', whereArgs: [user.id]);
+
+    // Save the new token
+    await db.insert('reset_tokens', {
+      'user_id': user.id,
+      'email': user.email,
+      'phone': user.phone,
+      'token': token,
+      'verification_method': verificationMethod,
+      'expiry_time': expiryTime,
+      'is_used': 0,
+    });
+
+    return {
+      'success': true,
+      'token': token,
+      'verification_method': verificationMethod,
+      'user_id': user.id,
+      'email': user.email,
+      'phone': user.phone,
+      'name': user.name,
+    };
+  }
+
+  // Verify a reset token
+  Future<Map<String, dynamic>> verifyResetToken(
+    String emailOrPhone,
+    String token,
+  ) async {
+    Database db = await database;
+    final now = DateTime.now().toIso8601String();
+
+    // Find the token
+    List<Map<String, dynamic>> tokens = await db.query(
+      'reset_tokens',
+      where:
+          '(email = ? OR phone = ?) AND token = ? AND is_used = 0 AND expiry_time > ?',
+      whereArgs: [emailOrPhone, emailOrPhone, token, now],
+    );
+
+    if (tokens.isEmpty) {
+      return {
+        'success': false,
+        'message': 'Invalid or expired verification code',
+      };
+    }
+
+    // Token is valid
+    return {
+      'success': true,
+      'user_id': tokens.first['user_id'],
+      'verification_method': tokens.first['verification_method'],
+    };
+  }
+
+  // Reset the password
+  Future<bool> resetPassword(int userId, String newPassword) async {
     final db = await database;
-    final result = await db.query(
+
+    // Update the user's password
+    final result = await db.update(
       'users',
-      where: 'id = ? AND is_admin = 1',
+      {'password': newPassword},
+      where: 'id = ?',
       whereArgs: [userId],
     );
+
+    // Mark all tokens for the user as used
+    await markTokenAsUsed(userId);
+
+    return result > 0;
+  }
+  // Create a password reset token
+
+  Future<bool> createPasswordResetTokenForUser(
+    int userId,
+    String emailOrPhone,
+    String verificationMethod,
+  ) async {
+    final db = await database;
+    final result = await db.query(
+      'reset_tokens',
+      where: 'user_id = ? AND token = ? AND is_used = 0 AND expiry_time > ?',
+      whereArgs: [userId, token, DateTime.now().toIso8601String()],
+    );
+
     return result.isNotEmpty;
   }
 
-  // Add method to check if user is the default admin
-  Future<bool> isDefaultAdmin(int userId) async {
+  // Add this method to your DatabaseHelper class
+  Future<void> ensureResetTokensTableExists() async {
     final db = await database;
-    final result = await db.query(
-      'users',
-      where: 'id = ? AND is_default_admin = 1',
+
+    try {
+      // Check if table exists
+      var tables = await db.rawQuery(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='reset_tokens'",
+      );
+
+      if (tables.isEmpty) {
+        print("Creating reset_tokens table");
+
+        // Create the table if it doesn't exist
+        await db.execute('''
+        CREATE TABLE reset_tokens(
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL,
+          email TEXT NOT NULL,
+          phone TEXT NOT NULL,
+          token TEXT NOT NULL,
+          verification_method TEXT NOT NULL,
+          expiry_time TIMESTAMP NOT NULL,
+          is_used INTEGER DEFAULT 0,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY(user_id) REFERENCES users(id)
+        )
+      ''');
+
+        print("reset_tokens table created successfully");
+      } else {
+        print("reset_tokens table already exists");
+      }
+    } catch (e) {
+      print("Error ensuring reset_tokens table exists: $e");
+    }
+  }
+
+  Future<void> markTokenAsUsed(int userId) async {
+    final db = await database;
+
+    await db.update(
+      'reset_tokens',
+      {'is_used': 1},
+      where: 'user_id = ?',
       whereArgs: [userId],
     );
-    return result.isNotEmpty;
+  }
+
+  Future<void> sendEmail(String email, String token) async {
+    // Replace this with your email-sending logic
+    print('Sending email to $email with token: $token');
   }
 }
