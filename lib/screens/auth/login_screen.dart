@@ -4,8 +4,7 @@ import 'package:tickiting/screens/auth/forgot_password_screen.dart';
 import 'package:tickiting/screens/auth/signup_screen.dart';
 import 'package:tickiting/screens/home_screen.dart';
 import 'package:tickiting/utils/theme.dart';
-import 'package:tickiting/utils/database_helper.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:tickiting/services/auth_service.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -37,22 +36,18 @@ class _LoginScreenState extends State<LoginScreen> {
       });
 
       try {
-        // Authenticate with database
-        final user = await DatabaseHelper().getUser(
+        final user = await AuthService().login(
           _emailController.text,
           _passwordController.text,
         );
 
-        setState(() {
-          _isLoading = false;
-        });
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+          });
+        }
 
         if (user != null) {
-          // Save user ID to shared preferences
-          final prefs = await SharedPreferences.getInstance();
-          await prefs.setInt('current_user_id', user.id!);
-
-          // Login successful
           if (mounted) {
             Navigator.pushReplacement(
               context,
@@ -60,16 +55,19 @@ class _LoginScreenState extends State<LoginScreen> {
             );
           }
         } else {
-          // Login failed
-          setState(() {
-            _errorMessage = 'Invalid email or password';
-          });
+          if (mounted) {
+            setState(() {
+              _errorMessage = 'Invalid email or password';
+            });
+          }
         }
       } catch (e) {
-        setState(() {
-          _isLoading = false;
-          _errorMessage = 'An error occurred: $e';
-        });
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+            _errorMessage = 'An error occurred: $e';
+          });
+        }
       }
     }
   }
@@ -117,7 +115,6 @@ class _LoginScreenState extends State<LoginScreen> {
               key: _formKey,
               child: Column(
                 children: [
-                  // Email field
                   TextFormField(
                     controller: _emailController,
                     keyboardType: TextInputType.emailAddress,
@@ -130,16 +127,14 @@ class _LoginScreenState extends State<LoginScreen> {
                       if (value == null || value.isEmpty) {
                         return 'Please enter your email';
                       }
-                      if (!RegExp(
-                        r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$',
-                      ).hasMatch(value)) {
+                      if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$')
+                          .hasMatch(value)) {
                         return 'Please enter a valid email';
                       }
                       return null;
                     },
                   ),
                   const SizedBox(height: 20),
-                  // Password field
                   TextFormField(
                     controller: _passwordController,
                     obscureText: _obscurePassword,
@@ -171,7 +166,6 @@ class _LoginScreenState extends State<LoginScreen> {
                     },
                   ),
                   const SizedBox(height: 20),
-                  // Forgot password
                   Align(
                     alignment: Alignment.centerRight,
                     child: TextButton(
@@ -187,32 +181,29 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                   ),
                   const SizedBox(height: 40),
-                  // Login button
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(
                       onPressed: _isLoading ? null : _login,
-                      child:
-                          _isLoading
-                              ? const SizedBox(
-                                width: 20,
-                                height: 20,
-                                child: CircularProgressIndicator(
-                                  color: Colors.white,
-                                  strokeWidth: 2,
-                                ),
-                              )
-                              : const Text(
-                                'Login',
-                                style: TextStyle(fontSize: 18),
+                      child: _isLoading
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                color: Colors.white,
+                                strokeWidth: 2,
                               ),
+                            )
+                          : const Text(
+                              'Login',
+                              style: TextStyle(fontSize: 18),
+                            ),
                     ),
                   ),
                 ],
               ),
             ),
             const SizedBox(height: 40),
-            // Sign up option
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [

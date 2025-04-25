@@ -2,7 +2,7 @@
 class Booking {
   final String id;
   final int userId;
-  final String busId;
+  final int busId;
   final String fromLocation;
   final String toLocation;
   final String travelDate;
@@ -12,8 +12,8 @@ class Booking {
   final String paymentMethod;
   final String paymentStatus;
   final String bookingStatus;
-  final String? createdAt;
-  bool notificationSent; // Added field to track if notifications have been sent
+  final bool notificationSent;
+  final String createdAt;
 
   Booking({
     required this.id,
@@ -28,10 +28,31 @@ class Booking {
     required this.paymentMethod,
     required this.paymentStatus,
     required this.bookingStatus,
-    this.createdAt,
-    this.notificationSent = false,
+    required this.notificationSent,
+    required this.createdAt,
   });
 
+  // Factory constructor to create a Booking from a Map
+  factory Booking.fromMap(Map<String, dynamic> map) {
+    return Booking(
+      id: map['id'] as String,
+      userId: map['user_id'] as int,
+      busId: map['bus_id'] as int,
+      fromLocation: map['from_location'] as String,
+      toLocation: map['to_location'] as String,
+      travelDate: map['travel_date'] as String,
+      passengers: map['passengers'] as int,
+      seatNumbers: map['seat_numbers'] as String,
+      totalAmount: map['total_amount'] as double,
+      paymentMethod: map['payment_method'] as String,
+      paymentStatus: map['payment_status'] as String,
+      bookingStatus: map['booking_status'] as String,
+      notificationSent: (map['notification_sent'] as int) == 1,
+      createdAt: map['created_at'] as String,
+    );
+  }
+
+  // Convert a Booking to a Map
   Map<String, dynamic> toMap() {
     return {
       'id': id,
@@ -46,27 +67,8 @@ class Booking {
       'payment_method': paymentMethod,
       'payment_status': paymentStatus,
       'booking_status': bookingStatus,
-      'created_at': createdAt ?? DateTime.now().toIso8601String(),
       'notification_sent': notificationSent ? 1 : 0,
+      'created_at': createdAt,
     };
-  }
-
-  factory Booking.fromMap(Map<String, dynamic> map) {
-    return Booking(
-      id: map['id'],
-      userId: map['user_id'],
-      busId: map['bus_id'],
-      fromLocation: map['from_location'],
-      toLocation: map['to_location'],
-      travelDate: map['travel_date'],
-      passengers: map['passengers'],
-      seatNumbers: map['seat_numbers'],
-      totalAmount: map['total_amount'],
-      paymentMethod: map['payment_method'],
-      paymentStatus: map['payment_status'],
-      bookingStatus: map['booking_status'],
-      createdAt: map['created_at'],
-      notificationSent: map['notification_sent'] == 1,
-    );
   }
 }

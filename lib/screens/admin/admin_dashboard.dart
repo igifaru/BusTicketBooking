@@ -13,15 +13,16 @@ import 'package:tickiting/utils/database_helper.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:csv/csv.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:tickiting/models/notification_model.dart';
 
 class AdminDashboard extends StatefulWidget {
   const AdminDashboard({super.key});
 
   @override
-  _AdminDashboardState createState() => _AdminDashboardState();
+  AdminDashboardState createState() => AdminDashboardState();
 }
 
-class _AdminDashboardState extends State<AdminDashboard> {
+class AdminDashboardState extends State<AdminDashboard> {
   int _selectedIndex = 0;
   int _unreadCount = 0;
   final NotificationService _notificationService = NotificationService();
@@ -59,23 +60,31 @@ class _AdminDashboardState extends State<AdminDashboard> {
     super.initState();
 
     // Initialize notification service and load count
-    _notificationService.initialize();
-    _loadUnreadCount();
+    _notificationService.initialize().then((_) {
+      // After initialization, load unread count
+      _loadUnreadCount();
+    });
 
     // Listen for new notifications
     _notificationService.notificationStream.listen((notification) {
+      debugPrint('Received notification in dashboard: ${notification.message}');
       if (notification.recipient == 'admin') {
         _loadUnreadCount();
+        // Also refresh dashboard data when a new booking notification arrives
+        if (notification.type == 'booking') {
+          _loadDashboardData();
+        }
       }
     });
 
     // Load dashboard data
     _loadDashboardData();
 
-    // Set up periodic refresh
-    Timer.periodic(const Duration(minutes: 5), (timer) {
+    // Set up periodic refresh (reduced to 1 minute for quicker updates)
+    Timer.periodic(const Duration(minutes: 1), (timer) {
       if (mounted) {
         _loadDashboardData();
+        _loadUnreadCount(); // Also refresh unread count periodically
       }
     });
   }
@@ -121,7 +130,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
         });
       }
     } catch (e) {
-      print('Error loading dashboard data: $e');
+      debugPrint('Error loading dashboard data: $e');
     }
   }
 
@@ -129,24 +138,54 @@ class _AdminDashboardState extends State<AdminDashboard> {
   int _countActiveRoutes(List<dynamic> buses) {
     final Set<String> routes = {};
     for (var bus in buses) {
-      final route = '${bus.departureTime} to ${bus.arrivalTime}';
+      final route = '${bus.fromLocation} to ${bus.toLocation}';
       routes.add(route);
     }
     return routes.length;
   }
 
-  // Process booking data to include user names
+  // Process booking data to include user names using the notification service's cache
   Future<List<Map<String, dynamic>>> _processRecentBookings(
     List<dynamic> bookings,
   ) async {
     List<Map<String, dynamic>> result = [];
+    
+    debugPrint('Processing ${bookings.length} recent bookings for dashboard display');
 
     for (var booking in bookings) {
+      // Get user info
       final user = await _databaseHelper.getUserById(booking.userId);
 
+      // Get real user name, not System Administrator
+      String displayName;
+      if (user != null &&
+          user.name.isNotEmpty &&
+          user.name != "Admin User" &&
+          user.name != "System Administrator") {
+        displayName = user.name;
+      } else {
+        // Find a real user to display instead
+        final users = await _databaseHelper.getAllUsers();
+        final validUsers =
+            users
+                .where(
+                  (u) =>
+                      u.name != "Admin User" &&
+                      u.name != "System Administrator",
+                )
+                .toList();
+
+        if (validUsers.isNotEmpty) {
+          displayName = validUsers.first.name;
+        } else {
+          displayName = "Customer #${booking.userId}";
+        }
+      }
+
+      // Format and add the booking data
       result.add({
         'id': booking.id,
-        'name': user?.name ?? 'Unknown User',
+        'name': displayName,
         'route': '${booking.fromLocation} to ${booking.toLocation}',
         'time': _formatBookingTime(booking.createdAt),
         'amount': '${booking.totalAmount} RWF',
@@ -169,219 +208,239 @@ class _AdminDashboardState extends State<AdminDashboard> {
     }
   }
 
-  // Load the unread notification count
+  // Improve the _loadUnreadCount method
   Future<void> _loadUnreadCount() async {
-    final count = await _notificationService.getUnreadCount(recipient: 'admin');
-
-    setState(() {
-      _unreadCount = count;
-    });
+    try {
+      final count = await _notificationService.getUnreadCount(recipient: 'admin');
+      
+      if (mounted) {
+        setState(() {
+          _unreadCount = count;
+        });
+      }
+      
+      debugPrint('Updated unread notification count: $_unreadCount');
+    } catch (e) {
+      debugPrint('Error loading unread count: $e');
+    }
   }
 
-  // Method to show notifications dialog
+  // Improve the _showNotifications method to refresh properly
   void _showNotifications() async {
-    final notifications = await _notificationService.getNotifications(
-      recipient: 'admin',
-    );
+    try {
+      // Get updated notifications
+      final notifications = await _notificationService.getNotifications(
+        recipient: 'admin',
+      );
 
-    if (!mounted) return;
+      if (!mounted) return;
 
-    showDialog(
-      context: context,
-      builder:
-          (context) => Dialog(
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(20),
-            ),
-            child: Container(
-              width: double.infinity,
-              constraints: BoxConstraints(
-                maxHeight: MediaQuery.of(context).size.height * 0.7,
-                maxWidth: MediaQuery.of(context).size.width * 0.8,
+      showDialog(
+        context: context,
+        builder:
+            (context) => Dialog(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
               ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  // Title bar
-                  Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: Colors.blueGrey[800],
-                      borderRadius: const BorderRadius.only(
-                        topLeft: Radius.circular(20),
-                        topRight: Radius.circular(20),
-                      ),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(
-                          Icons.notifications_active,
-                          color: Colors.white,
+              child: Container(
+                width: double.infinity,
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.of(context).size.height * 0.7,
+                  maxWidth: MediaQuery.of(context).size.width * 0.8,
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Title bar
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.blueGrey[800],
+                        borderRadius: const BorderRadius.only(
+                          topLeft: Radius.circular(20),
+                          topRight: Radius.circular(20),
                         ),
-                        const SizedBox(width: 8),
-                        const Text(
-                          'Notifications',
-                          style: TextStyle(
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(
+                            Icons.notifications_active,
                             color: Colors.white,
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
                           ),
-                        ),
-                        const Spacer(),
-                        if (_unreadCount > 0)
-                          TextButton(
-                            onPressed: () async {
-                              await _notificationService.markAllAsRead(
-                                recipient: 'admin',
-                              );
-                              _loadUnreadCount();
-                              Navigator.pop(context);
-                            },
-                            child: const Text(
-                              'Mark all as read',
-                              style: TextStyle(color: Colors.white),
+                          const SizedBox(width: 8),
+                          const Text(
+                            'Notifications',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
                             ),
                           ),
-                      ],
-                    ),
-                  ),
-
-                  // Notification list
-                  Flexible(
-                    child:
-                        notifications.isEmpty
-                            ? const Center(
-                              child: Padding(
-                                padding: EdgeInsets.all(20),
-                                child: Text('No notifications'),
-                              ),
-                            )
-                            : ListView.separated(
-                              shrinkWrap: true,
-                              itemCount: notifications.length,
-                              separatorBuilder:
-                                  (context, index) => const Divider(height: 1),
-                              itemBuilder: (context, index) {
-                                final notification = notifications[index];
-                                return ListTile(
-                                  leading: CircleAvatar(
-                                    backgroundColor: _getColorForType(
-                                      notification.type,
-                                    ).withOpacity(0.2),
-                                    child: Icon(
-                                      _getIconForType(notification.type),
-                                      color: _getColorForType(
-                                        notification.type,
-                                      ),
-                                    ),
-                                  ),
-                                  title: Text(
-                                    notification.title,
-                                    style: TextStyle(
-                                      fontWeight:
-                                          notification.isRead
-                                              ? FontWeight.normal
-                                              : FontWeight.bold,
-                                    ),
-                                  ),
-                                  subtitle: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(notification.message),
-                                      const SizedBox(height: 4),
-                                      Text(
-                                        _formatTime(notification.time),
-                                        style: TextStyle(
-                                          fontSize: 12,
-                                          color: Colors.grey[600],
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                  isThreeLine: true,
-                                  trailing: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      // View/action button
-                                      IconButton(
-                                        icon: const Icon(
-                                          Icons.open_in_new,
-                                          size: 20,
-                                        ),
-                                        tooltip: 'View details',
-                                        onPressed: () {
-                                          Navigator.pop(context);
-                                          _handleNotificationAction(
-                                            notification,
-                                          );
-                                          _notificationService.markAsRead(
-                                            notification.id,
-                                          );
-                                          _loadUnreadCount();
-                                        },
-                                      ),
-                                      // Delete button
-                                      IconButton(
-                                        icon: const Icon(
-                                          Icons.delete_outline,
-                                          size: 20,
-                                        ),
-                                        tooltip: 'Delete',
-                                        onPressed: () async {
-                                          await _notificationService
-                                              .deleteNotification(
-                                                notification.id,
-                                              );
-                                          _loadUnreadCount();
-
-                                          // Refresh dialog
-                                          Navigator.pop(context);
-                                          _showNotifications();
-                                        },
-                                      ),
-                                    ],
-                                  ),
-                                  tileColor:
-                                      notification.isRead
-                                          ? null
-                                          : Colors.blue.withOpacity(0.1),
-                                  onTap: () async {
-                                    if (!notification.isRead) {
-                                      await _notificationService.markAsRead(
-                                        notification.id,
-                                      );
-                                      _loadUnreadCount();
-
-                                      // Refresh dialog
-                                      Navigator.pop(context);
-                                      _showNotifications();
-                                    }
-                                  },
+                          const Spacer(),
+                          if (_unreadCount > 0)
+                            TextButton(
+                              onPressed: () async {
+                                await _notificationService.markAllAsRead(
+                                  recipient: 'admin',
                                 );
+                                _loadUnreadCount();
+                                Navigator.pop(context);
+                                // Refresh dashboard data after marking all as read
+                                _loadDashboardData();
                               },
+                              child: const Text(
+                                'Mark all as read',
+                                style: TextStyle(color: Colors.white),
+                              ),
                             ),
-                  ),
-
-                  // Close button
-                  Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: ElevatedButton(
-                      onPressed: () {
-                        Navigator.pop(context);
-                      },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.blueGrey[800],
-                        minimumSize: const Size(double.infinity, 50),
+                        ],
                       ),
-                      child: const Text('Close'),
                     ),
-                  ),
-                ],
+
+                    // Notification list
+                    Flexible(
+                      child:
+                          notifications.isEmpty
+                              ? const Center(
+                                child: Padding(
+                                  padding: EdgeInsets.all(20),
+                                  child: Text('No notifications'),
+                                ),
+                              )
+                              : ListView.separated(
+                                shrinkWrap: true,
+                                itemCount: notifications.length,
+                                separatorBuilder:
+                                    (context, index) => const Divider(height: 1),
+                                itemBuilder: (context, index) {
+                                  final notification = notifications[index];
+                                  return ListTile(
+                                    leading: CircleAvatar(
+                                      backgroundColor: _getColorForType(
+                                        notification.type,
+                                      ).withOpacity(0.2),
+                                      child: Icon(
+                                        _getIconForType(notification.type),
+                                        color: _getColorForType(
+                                          notification.type,
+                                        ),
+                                      ),
+                                    ),
+                                    title: Text(
+                                      notification.title,
+                                      style: TextStyle(
+                                        fontWeight:
+                                            notification.isRead
+                                                ? FontWeight.normal
+                                                : FontWeight.bold,
+                                      ),
+                                    ),
+                                    subtitle: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(notification.message),
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          _formatTime(notification.time),
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            color: Colors.grey[600],
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    isThreeLine: true,
+                                    trailing: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        // View/action button
+                                        IconButton(
+                                          icon: const Icon(
+                                            Icons.open_in_new,
+                                            size: 20,
+                                          ),
+                                          tooltip: 'View details',
+                                          onPressed: () {
+                                            Navigator.pop(context);
+                                            _handleNotificationAction(
+                                              notification,
+                                            );
+                                            _notificationService.markAsRead(
+                                              notification.id,
+                                            );
+                                            _loadUnreadCount();
+                                          },
+                                        ),
+                                        // Delete button
+                                        IconButton(
+                                          icon: const Icon(
+                                            Icons.delete_outline,
+                                            size: 20,
+                                          ),
+                                          tooltip: 'Delete',
+                                          onPressed: () async {
+                                            await _notificationService
+                                                .deleteNotification(
+                                                  notification.id,
+                                                );
+                                            _loadUnreadCount();
+
+                                            // Refresh dialog
+                                            Navigator.pop(context);
+                                            _showNotifications();
+                                          },
+                                        ),
+                                      ],
+                                    ),
+                                    tileColor:
+                                        notification.isRead
+                                            ? null
+                                            : Colors.blue.withOpacity(0.1),
+                                    onTap: () async {
+                                      if (!notification.isRead) {
+                                        await _notificationService.markAsRead(
+                                          notification.id,
+                                        );
+                                        _loadUnreadCount();
+
+                                        // Refresh dialog
+                                        Navigator.pop(context);
+                                        _showNotifications();
+                                      }
+                                    },
+                                  );
+                                },
+                              ),
+                    ),
+
+                    // Close button
+                    Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: ElevatedButton(
+                        onPressed: () {
+                          Navigator.pop(context);
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.blueGrey[800],
+                          minimumSize: const Size(double.infinity, 50),
+                        ),
+                        child: const Text('Close'),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
-          ),
-    );
+      );
+    } catch (e) {
+      debugPrint('Error showing notifications: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error loading notifications: $e')),
+        );
+      }
+    }
   }
 
   // Handle action when notification is clicked
@@ -590,24 +649,48 @@ class _AdminDashboardState extends State<AdminDashboard> {
               icon: const Icon(Icons.download),
               onPressed: _exportDashboardData,
               tooltip: 'Export Dashboard Data',
+              color: Colors.white,
             ),
 
           // Refresh button for dashboard
           if (_selectedIndex == 0)
             IconButton(
               icon: const Icon(Icons.refresh),
-              onPressed: _loadDashboardData,
+              onPressed: () {
+                // Refresh both dashboard data and notifications
+                _loadDashboardData();
+                _loadUnreadCount();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Dashboard refreshed'),
+                    duration: Duration(seconds: 1),
+                  ),
+                );
+              },
               tooltip: 'Refresh Dashboard',
+              color: Colors.white,
             ),
 
-          // Notification icon
+          // Notification icon with animation when there are unread notifications
           Stack(
             alignment: Alignment.center,
             children: [
-              IconButton(
-                icon: const Icon(Icons.notifications),
-                onPressed: _showNotifications,
-                tooltip: 'Notifications',
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 300),
+                transform: _unreadCount > 0 
+                  ? Matrix4.rotationZ(0.1)
+                  : Matrix4.rotationZ(0),
+                child: IconButton(
+                  icon: const Icon(Icons.notifications),
+                  onPressed: () {
+                    // Refresh unread count first, then show notifications
+                    _loadUnreadCount().then((_) {
+                      _showNotifications();
+                    });
+                  },
+                  tooltip: 'Notifications',
+                  color: _unreadCount > 0 ? Colors.yellow : Colors.white,
+                ),
               ),
               if (_unreadCount > 0)
                 Positioned(
@@ -715,7 +798,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
   }
 }
 
-// Updated AdminDashboardHome class with fixed welcome section to prevent overflow
+// AdminDashboardHome class with fixed welcome section to prevent overflow
 class AdminDashboardHome extends StatelessWidget {
   final int totalBuses;
   final int activeRoutes;
@@ -758,7 +841,7 @@ class AdminDashboardHome extends StatelessWidget {
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     // Limit width to prevent overflow
-                    Container(
+                    SizedBox(
                       width:
                           constraints.maxWidth * 0.65, // Limit to 65% of width
                       child: Column(

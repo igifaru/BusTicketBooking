@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:tickiting/services/notification_service.dart';
 import 'package:tickiting/utils/theme.dart';
 import 'package:tickiting/utils/database_helper.dart';
-import 'package:tickiting/models/booking.dart';
 
 class NotificationIcon extends StatefulWidget {
   final String recipient;
@@ -12,10 +11,10 @@ class NotificationIcon extends StatefulWidget {
   const NotificationIcon({super.key, required this.recipient, this.userId});
 
   @override
-  _NotificationIconState createState() => _NotificationIconState();
+  NotificationIconState createState() => NotificationIconState();
 }
 
-class _NotificationIconState extends State<NotificationIcon> {
+class NotificationIconState extends State<NotificationIcon> {
   final NotificationService _notificationService = NotificationService();
   final DatabaseHelper _databaseHelper = DatabaseHelper();
   int _unreadCount = 0;
@@ -236,7 +235,7 @@ class _NotificationIconState extends State<NotificationIcon> {
               needsRefresh = true;
             }
           } catch (e) {
-            print("Error updating notification in widget: $e");
+            debugPrint("Error updating notification in widget: $e");
           }
         } 
         else {

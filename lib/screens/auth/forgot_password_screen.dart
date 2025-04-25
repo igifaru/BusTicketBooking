@@ -1,34 +1,27 @@
-// lib/screens/auth/forgot_password_screen.dart
 import 'package:flutter/material.dart';
 import 'package:tickiting/screens/auth/verify_reset_code_screen.dart';
-import 'package:tickiting/utils/theme.dart';
-import 'package:tickiting/utils/database_helper.dart';
-import 'package:tickiting/utils/email_service.dart';
-import 'package:tickiting/utils/sms_service.dart';
+//import 'package:tickiting/utils/theme.dart';
 
 class ForgotPasswordScreen extends StatefulWidget {
-  const ForgotPasswordScreen({Key? key}) : super(key: key);
+  const ForgotPasswordScreen({super.key});
 
   @override
-  _ForgotPasswordScreenState createState() => _ForgotPasswordScreenState();
+  ForgotPasswordScreenState createState() => ForgotPasswordScreenState();
 }
 
-class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
-  // Use a different name for the form key to avoid conflicts
+class ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
   final GlobalKey<FormState> forgotPasswordFormKey = GlobalKey<FormState>();
-  final TextEditingController emailOrPhoneController = TextEditingController();
+  final TextEditingController emailController = TextEditingController();
   bool isLoading = false;
   String errorMessage = '';
-  String verificationMethod = 'email';
 
   @override
   void dispose() {
-    emailOrPhoneController.dispose();
+    emailController.dispose();
     super.dispose();
   }
 
-  void sendVerificationCode() async {
-    // Check validation without using currentState
+  void sendResetRequest() async {
     if (forgotPasswordFormKey.currentState != null &&
         forgotPasswordFormKey.currentState!.validate()) {
       setState(() {
@@ -39,17 +32,9 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
       try {
         // Simulate the API call for now
         await Future.delayed(const Duration(seconds: 2));
-        
-        // For demonstration purposes, always succeed in development
-        final bool sendSuccess = true;
-        final Map<String, dynamic> result = {
-          'success': true,
-          'user_id': 1,
-          'email': emailOrPhoneController.text,
-          'phone': '1234567890',
-          'name': 'Test User',
-          'token': '123456'
-        };
+
+        // For demonstration purposes, always succeed
+        final bool sendSuccess = emailController.text != 'fail@example.com';
 
         setState(() {
           isLoading = false;
@@ -60,17 +45,15 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
             Navigator.push(
               context,
               MaterialPageRoute(
-                builder: (context) => VerifyResetCodeScreen(
-                  userId: result['user_id'],
-                  emailOrPhone: emailOrPhoneController.text,
-                  verificationMethod: verificationMethod,
-                ),
+                builder:
+                    (context) =>
+                        VerifyResetCodeScreen(email: emailController.text),
               ),
             );
           }
         } else {
           setState(() {
-            errorMessage = 'Failed to send verification code. Please try again.';
+            errorMessage = 'Failed to send reset request. Please try again.';
           });
         }
       } catch (e) {
@@ -102,60 +85,10 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
             ),
             const SizedBox(height: 8),
             const Text(
-              'Choose how to receive your code',
+              'Enter your email to reset your password',
               style: TextStyle(fontSize: 16, color: Colors.grey),
             ),
             const SizedBox(height: 24),
-            
-            // Verification method selector
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.grey[100],
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('Verification Method', 
-                    style: TextStyle(fontWeight: FontWeight.bold)),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: RadioListTile<String>(
-                          title: const Text('Email'),
-                          value: 'email',
-                          groupValue: verificationMethod,
-                          onChanged: (value) {
-                            setState(() {
-                              verificationMethod = value!;
-                            });
-                          },
-                          dense: true,
-                          contentPadding: EdgeInsets.zero,
-                        ),
-                      ),
-                      Expanded(
-                        child: RadioListTile<String>(
-                          title: const Text('SMS'),
-                          value: 'phone',
-                          groupValue: verificationMethod,
-                          onChanged: (value) {
-                            setState(() {
-                              verificationMethod = value!;
-                            });
-                          },
-                          dense: true,
-                          contentPadding: EdgeInsets.zero,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            
-            const SizedBox(height: 16),
             if (errorMessage.isNotEmpty)
               Container(
                 padding: const EdgeInsets.all(8),
@@ -170,40 +103,29 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                   style: const TextStyle(color: Colors.red),
                 ),
               ),
-              
             Form(
               key: forgotPasswordFormKey,
               child: Column(
                 children: [
                   TextFormField(
-                    controller: emailOrPhoneController,
-                    keyboardType: verificationMethod == 'email'
-                        ? TextInputType.emailAddress
-                        : TextInputType.phone,
+                    controller: emailController,
+                    keyboardType: TextInputType.emailAddress,
                     decoration: InputDecoration(
-                      labelText: verificationMethod == 'email' 
-                        ? 'Email' 
-                        : 'Phone Number',
-                      prefixIcon: Icon(
-                        verificationMethod == 'email'
-                            ? Icons.email
-                            : Icons.phone,
-                      ),
+                      labelText: 'Email',
+                      prefixIcon: const Icon(Icons.email),
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(8),
                       ),
                     ),
                     validator: (value) {
                       if (value == null || value.isEmpty) {
-                        return 'Please enter your ${verificationMethod == 'email' ? 'email' : 'phone number'}';
+                        return 'Please enter your email';
                       }
-                      
-                      if (verificationMethod == 'email' &&
-                          !RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$')
-                              .hasMatch(value)) {
+                      if (!RegExp(
+                        r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$',
+                      ).hasMatch(value)) {
                         return 'Please enter a valid email';
                       }
-                      
                       return null;
                     },
                   ),
@@ -212,17 +134,18 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                     width: double.infinity,
                     height: 48,
                     child: ElevatedButton(
-                      onPressed: isLoading ? null : sendVerificationCode,
-                      child: isLoading
-                          ? const SizedBox(
-                              width: 24,
-                              height: 24,
-                              child: CircularProgressIndicator(
-                                color: Colors.white,
-                                strokeWidth: 2,
-                              ),
-                            )
-                          : const Text('Send Verification Code'),
+                      onPressed: isLoading ? null : sendResetRequest,
+                      child:
+                          isLoading
+                              ? const SizedBox(
+                                width: 24,
+                                height: 24,
+                                child: CircularProgressIndicator(
+                                  color: Colors.white,
+                                  strokeWidth: 2,
+                                ),
+                              )
+                              : const Text('Send Reset Request'),
                     ),
                   ),
                 ],

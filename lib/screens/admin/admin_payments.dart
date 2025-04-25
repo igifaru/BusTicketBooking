@@ -1,731 +1,541 @@
 // lib/screens/admin/admin_payments.dart
-import 'dart:io';
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:tickiting/models/booking.dart';
-import 'package:tickiting/utils/theme.dart';
 import 'package:tickiting/utils/database_helper.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:csv/csv.dart';
-import 'package:share_plus/share_plus.dart';
 
 class AdminPayments extends StatefulWidget {
   const AdminPayments({super.key});
 
   @override
-  _AdminPaymentsState createState() => _AdminPaymentsState();
+  State<AdminPayments> createState() => _AdminPaymentsState();
 }
 
-class _AdminPaymentsState extends State<AdminPayments> {
-  List<Booking> _payments = [];
+class _AdminPaymentsState extends State<AdminPayments> with SingleTickerProviderStateMixin {
+  late TabController _tabController;
+  final DatabaseHelper _databaseHelper = DatabaseHelper();
+  List<Booking> _pendingBookings = [];
+  List<Booking> _confirmedBookings = [];
+  List<Booking> _cancelledBookings = [];
   bool _isLoading = true;
-  String _filterStatus = 'All';
-  String _filterRoute = 'All';
-  List<Map<String, String>> _availableRoutes = [];
+  Timer? _refreshTimer;
 
   @override
   void initState() {
     super.initState();
-    _loadPayments();
-    _loadAvailableRoutes();
+    _tabController = TabController(length: 3, vsync: this);
+    _loadBookings();
+    
+    // Set up timer to refresh data periodically
+    _refreshTimer = Timer.periodic(const Duration(seconds: 30), (timer) {
+      if (mounted) {
+        _loadBookings();
+      }
+    });
+  }
+  
+  @override
+  void dispose() {
+    _tabController.dispose();
+    _refreshTimer?.cancel();
+    super.dispose();
   }
 
-  Future<void> _loadAvailableRoutes() async {
-    try {
-      // Get all available routes from database
-      final routes = await DatabaseHelper().getAvailableRoutes();
-
-      // Add "All" option at the beginning
-      setState(() {
-        _availableRoutes = [
-          {'from': 'All', 'to': 'All'},
-          ...routes,
-        ];
-      });
-    } catch (e) {
-      print('Error loading routes: $e');
-    }
-  }
-
-  Future<void> _loadPayments() async {
+  // Load all bookings with user details
+  Future<void> _loadBookings() async {
     setState(() {
       _isLoading = true;
     });
 
     try {
-      // Load all bookings from database
-      final bookings = await DatabaseHelper().getAllBookings();
-
+      // Get all bookings
+      final bookings = await _databaseHelper.getAllBookings();
+      
+      // Separate bookings by status
+      final pending = bookings.where((b) => b.bookingStatus == 'Pending').toList();
+      final confirmed = bookings.where((b) => b.bookingStatus == 'Confirmed').toList();
+      final cancelled = bookings.where((b) => b.bookingStatus == 'Cancelled').toList();
+      
       setState(() {
-        _payments = bookings;
+        _pendingBookings = pending;
+        _confirmedBookings = confirmed;
+        _cancelledBookings = cancelled;
         _isLoading = false;
       });
+      
+      debugPrint('Loaded ${bookings.length} bookings (${pending.length} pending, ${confirmed.length} confirmed, ${cancelled.length} cancelled)');
     } catch (e) {
-      print('Error loading payments: $e');
+      debugPrint('Error loading bookings: $e');
       setState(() {
         _isLoading = false;
       });
     }
   }
 
-  // Export payments to CSV file without permission check
-  Future<void> exportPayments(List<Booking> payments) async {
+  // Confirm a booking
+  Future<void> _confirmBooking(String bookingId) async {
+    setState(() {
+      _isLoading = true;
+    });
+
     try {
-      // Prepare the CSV data
-      List<List<dynamic>> csvData = [];
-
-      // Add header row
-      csvData.add([
-        'Payment ID',
-        'User ID',
-        'From Location',
-        'To Location',
-        'Travel Date',
-        'Passengers',
-        'Seat Numbers',
-        'Amount',
-        'Payment Method',
-        'Payment Status',
-        'Booking Status',
-        'Created At',
-      ]);
-
-      // Add payment data rows
-      for (var payment in payments) {
-        csvData.add([
-          payment.id,
-          payment.userId,
-          payment.fromLocation,
-          payment.toLocation,
-          payment.travelDate,
-          payment.passengers,
-          payment.seatNumbers,
-          payment.totalAmount,
-          payment.paymentMethod,
-          payment.paymentStatus,
-          payment.bookingStatus,
-          payment.createdAt ?? 'N/A',
-        ]);
-      }
-
-      // Convert to CSV string
-      String csv = const ListToCsvConverter().convert(csvData);
-
-      // Get the documents directory - this doesn't require permissions on most devices
-      final directory = await getApplicationDocumentsDirectory();
-      final fileName =
-          'rwanda_bus_payments_${DateTime.now().millisecondsSinceEpoch}.csv';
-      final filePath = '${directory.path}/$fileName';
-
-      // Write the file
-      final File file = File(filePath);
-      await file.writeAsString(csv);
-
-      // Share the file - this uses the OS-level sharing which handles permissions for us
-      String routeInfo = _filterRoute == 'All' ? 'All Routes' : _filterRoute;
-      String statusInfo =
-          _filterStatus == 'All' ? 'All Statuses' : _filterStatus;
-
-      await Share.shareXFiles(
-        [XFile(filePath)],
-        subject: 'Rwanda Bus Payments Export ($routeInfo - $statusInfo)',
-        text: 'Attached is the exported payments data from Rwanda Bus',
-      );
-    } catch (e) {
-      // Handle any errors that occur during export
-      print('Error exporting payments: $e');
-      // Show error message to user
-      if (mounted) {
+      final result = await _databaseHelper.updateBookingStatus(bookingId, 'Confirmed');
+      await _databaseHelper.updatePaymentStatus(bookingId, 'Confirmed');
+      
+      if (result > 0) {
+        // Get the booking to find the user
+        final booking = await _databaseHelper.getBookingById(bookingId);
+        if (booking != null) {
+          // Create notification for the user
+          await _databaseHelper.insertNotification({
+            'title': 'Booking Confirmed',
+            'message': 'Your booking from ${booking.fromLocation} to ${booking.toLocation} has been confirmed.',
+            'time': DateTime.now().toIso8601String(),
+            'isRead': 0,
+            'type': 'booking_confirmation',
+            'recipient': 'user',
+            'userId': booking.userId,
+          });
+        }
+        
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error exporting payments: ${e.toString()}'),
+          const SnackBar(
+            content: Text('Booking confirmed successfully'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Failed to confirm booking'),
             backgroundColor: Colors.red,
           ),
         );
       }
-      rethrow;
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    // Filter payments based on selected status and route
-    List<Booking> filteredPayments = _payments;
-
-    // Apply status filter
-    if (_filterStatus != 'All') {
-      filteredPayments =
-          filteredPayments
-              .where((payment) => payment.paymentStatus == _filterStatus)
-              .toList();
-    }
-
-    // Apply route filter
-    if (_filterRoute != 'All') {
-      final routeParts = _filterRoute.split(' to ');
-      if (routeParts.length == 2) {
-        final fromLocation = routeParts[0];
-        final toLocation = routeParts[1];
-
-        filteredPayments =
-            filteredPayments
-                .where(
-                  (payment) =>
-                      payment.fromLocation == fromLocation &&
-                      payment.toLocation == toLocation,
-                )
-                .toList();
-      }
-    }
-
-    return Scaffold(
-      body: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Title
-            const Text(
-              'Payment Management',
-              style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 20),
-            // Filter options
-            Row(
-              children: [
-                const Text('Status:'),
-                const SizedBox(width: 10),
-                DropdownButton<String>(
-                  value: _filterStatus,
-                  onChanged: (value) {
-                    setState(() {
-                      _filterStatus = value!;
-                    });
-                  },
-                  items:
-                      ['All', 'Confirmed', 'Pending', 'Failed'].map((status) {
-                        return DropdownMenuItem(
-                          value: status,
-                          child: Text(status),
-                        );
-                      }).toList(),
-                ),
-                const SizedBox(width: 20),
-                const Text('Route:'),
-                const SizedBox(width: 10),
-                DropdownButton<String>(
-                  value: _filterRoute,
-                  onChanged: (value) {
-                    setState(() {
-                      _filterRoute = value!;
-                    });
-                  },
-                  items:
-                      [
-                        'All',
-                        ..._availableRoutes
-                            .where((route) => route['from'] != 'All')
-                            .map(
-                              (route) => "${route['from']} to ${route['to']}",
-                            ),
-                      ].map((route) {
-                        return DropdownMenuItem(
-                          value: route,
-                          child: Text(route),
-                        );
-                      }).toList(),
-                ),
-                const Spacer(),
-                OutlinedButton.icon(
-                  onPressed: () async {
-                    // Show loading indicator
-                    showDialog(
-                      context: context,
-                      barrierDismissible: false,
-                      builder: (BuildContext context) {
-                        return const Dialog(
-                          child: Padding(
-                            padding: EdgeInsets.all(20.0),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                CircularProgressIndicator(),
-                                SizedBox(width: 20),
-                                Text("Exporting payments..."),
-                              ],
-                            ),
-                          ),
-                        );
-                      },
-                    );
-
-                    try {
-                      await exportPayments(filteredPayments);
-                      // Close loading dialog
-                      if (mounted) {
-                        Navigator.pop(context);
-
-                        // Show success message
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Payments exported successfully'),
-                            backgroundColor: Colors.green,
-                          ),
-                        );
-                      }
-                    } catch (e) {
-                      // Close loading dialog
-                      if (mounted) {
-                        Navigator.pop(context);
-                      }
-
-                      // Error is already handled in exportPayments function
-                    }
-                  },
-                  icon: const Icon(Icons.download),
-                  label: const Text('Export'),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: AppTheme.primaryColor,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 20),
-            // Payments list
-            Expanded(
-              child:
-                  _isLoading
-                      ? const Center(child: CircularProgressIndicator())
-                      : filteredPayments.isEmpty
-                      ? const Center(
-                        child: Text(
-                          'No payments found with the selected filters',
-                        ),
-                      )
-                      : RefreshIndicator(
-                        onRefresh: _loadPayments,
-                        child: ListView.builder(
-                          itemCount: filteredPayments.length,
-                          itemBuilder: (context, index) {
-                            final payment = filteredPayments[index];
-                            return _buildPaymentCard(payment);
-                          },
-                        ),
-                      ),
-            ),
-          ],
+      
+      // Reload bookings to update UI
+      await _loadBookings();
+    } catch (e) {
+      debugPrint('Error confirming booking: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error: $e'),
+          backgroundColor: Colors.red,
         ),
-      ),
-    );
-  }
-
-  Widget _buildPaymentCard(Booking payment) {
-    Color statusColor;
-    switch (payment.paymentStatus) {
-      case 'Confirmed':
-        statusColor = Colors.green;
-        break;
-      case 'Pending':
-        statusColor = Colors.orange;
-        break;
-      case 'Failed':
-        statusColor = Colors.red;
-        break;
-      default:
-        statusColor = Colors.grey;
+      );
+      setState(() {
+        _isLoading = false;
+      });
     }
-
-    return Card(
-      margin: const EdgeInsets.only(bottom: 15),
-      child: Padding(
-        padding: const EdgeInsets.all(15),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Payment ID: ${payment.id}',
-                        style: const TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                      const SizedBox(height: 5),
-                      Text(
-                        'User ID: ${payment.userId}',
-                        style: TextStyle(color: Colors.grey[600]),
-                      ),
-                    ],
-                  ),
-                ),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    color: statusColor.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: Text(
-                    payment.paymentStatus,
-                    style: TextStyle(
-                      color: statusColor,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 15),
-            // Highlight the route information
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: Colors.blue[50],
-                borderRadius: BorderRadius.circular(5),
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.route, size: 16, color: Colors.blue[800]),
-                  const SizedBox(width: 5),
-                  Text(
-                    '${payment.fromLocation} to ${payment.toLocation}',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: Colors.blue[800],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 15),
-            Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Travel Date',
-                        style: TextStyle(color: Colors.grey),
-                      ),
-                      Text(
-                        payment.travelDate,
-                        style: const TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                    ],
-                  ),
-                ),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Amount',
-                        style: TextStyle(color: Colors.grey),
-                      ),
-                      Text(
-                        '${payment.totalAmount} RWF',
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          color: AppTheme.primaryColor,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 15),
-            Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Payment Method',
-                        style: TextStyle(color: Colors.grey),
-                      ),
-                      Text(
-                        payment.paymentMethod,
-                        style: const TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                    ],
-                  ),
-                ),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('Date', style: TextStyle(color: Colors.grey)),
-                      Text(
-                        payment.createdAt ?? 'Unknown',
-                        style: const TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 15),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                if (payment.paymentStatus == 'Pending')
-                  OutlinedButton.icon(
-                    onPressed: () {
-                      // Approve payment logic
-                      _showApproveDialog(payment);
-                    },
-                    icon: const Icon(Icons.check_circle, color: Colors.green),
-                    label: const Text(
-                      'Approve',
-                      style: TextStyle(color: Colors.green),
-                    ),
-                    style: OutlinedButton.styleFrom(
-                      side: const BorderSide(color: Colors.green),
-                    ),
-                  ),
-                const SizedBox(width: 10),
-                OutlinedButton.icon(
-                  onPressed: () {
-                    // View details
-                    _showPaymentDetailsDialog(payment);
-                  },
-                  icon: const Icon(Icons.visibility),
-                  label: const Text('View Details'),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
   }
 
-  void _showApproveDialog(Booking payment) {
+  // Cancel a booking
+  Future<void> _cancelBooking(String bookingId) async {
+    final reasonController = TextEditingController();
+    
+    // Show dialog to get cancellation reason
     showDialog(
       context: context,
-      builder:
-          (context) => AlertDialog(
-            title: const Text('Approve Payment'),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Payment ID: ${payment.id}'),
-                Text('Route: ${payment.fromLocation} to ${payment.toLocation}'),
-                Text('Amount: ${payment.totalAmount} RWF'),
-                Text('Method: ${payment.paymentMethod}'),
-                const SizedBox(height: 10),
-                const Text('Are you sure you want to approve this payment?'),
-                const Text('This will confirm the ticket for the user.'),
-              ],
-            ),
-            actions: [
-              TextButton(
-                onPressed: () {
-                  Navigator.pop(context);
-                },
-                child: const Text('Cancel'),
+      builder: (context) => AlertDialog(
+        title: const Text('Cancel Booking'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('Please provide a reason for cancellation:'),
+            const SizedBox(height: 10),
+            TextField(
+              controller: reasonController,
+              maxLines: 3,
+              decoration: const InputDecoration(
+                hintText: 'Enter reason',
+                border: OutlineInputBorder(),
               ),
-              ElevatedButton(
-                onPressed: () async {
-                  try {
-                    // Update payment status in database
-                    await DatabaseHelper().updatePaymentStatus(
-                      payment.id,
-                      'Confirmed',
-                    );
-
-                    // Update booking status as well
-                    await DatabaseHelper().updateBookingStatus(
-                      payment.id,
-                      'Confirmed',
-                    );
-
-                    // Reload payments
-                    _loadPayments();
-
-                    Navigator.pop(context);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Payment approved and ticket confirmed'),
-                        backgroundColor: Colors.green,
-                      ),
-                    );
-                  } catch (e) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text('Error approving payment: $e'),
-                        backgroundColor: Colors.red,
-                      ),
-                    );
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              
+              setState(() {
+                _isLoading = true;
+              });
+              
+              try {
+                final result = await _databaseHelper.updateBookingStatus(bookingId, 'Cancelled');
+                
+                if (result > 0) {
+                  // Create notification for user
+                  final booking = await _databaseHelper.getBookingById(bookingId);
+                  if (booking != null) {
+                    await _databaseHelper.insertNotification({
+                      'title': 'Booking Cancelled',
+                      'message': 'Your booking from ${booking.fromLocation} to ${booking.toLocation} has been cancelled. ${reasonController.text.isNotEmpty ? "Reason: ${reasonController.text}" : ""}',
+                      'time': DateTime.now().toIso8601String(),
+                      'isRead': 0,
+                      'type': 'booking',
+                      'recipient': 'user',
+                      'userId': booking.userId,
+                    });
                   }
-                },
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
-                child: const Text('Approve'),
-              ),
-            ],
-          ),
-    );
-  }
-
-  void _showPaymentDetailsDialog(Booking payment) async {
-    // Try to get the user's name
-    String userName = 'User #${payment.userId}';
-    try {
-      final user = await DatabaseHelper().getUserById(payment.userId);
-      if (user != null) {
-        userName = user.name;
-      }
-    } catch (e) {
-      print('Error getting user: $e');
-    }
-
-    // Get the bus information
-    String busName = 'Unknown Bus';
-    try {
-      final bus = await DatabaseHelper().getBus(payment.busId);
-      if (bus != null) {
-        busName = bus.name;
-      }
-    } catch (e) {
-      print('Error getting bus: $e');
-    }
-
-    if (!mounted) return;
-
-    showDialog(
-      context: context,
-      builder:
-          (context) => AlertDialog(
-            title: const Text('Payment Details'),
-            content: SingleChildScrollView(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _buildDetailRow('Payment ID', payment.id),
-                  _buildDetailRow('User Name', userName),
-                  _buildDetailRow('User ID', '${payment.userId}'),
-                  _buildDetailRow('Bus', busName),
-                  _buildDetailRow('Bus ID', payment.busId),
-                  _buildDetailRow(
-                    'Route',
-                    '${payment.fromLocation} to ${payment.toLocation}',
+                  
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Booking cancelled successfully'),
+                      backgroundColor: Colors.orange,
+                    ),
+                  );
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Failed to cancel booking'),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                }
+                
+                // Reload bookings to update UI
+                await _loadBookings();
+              } catch (e) {
+                debugPrint('Error cancelling booking: $e');
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Error: $e'),
+                    backgroundColor: Colors.red,
                   ),
-                  _buildDetailRow('Travel Date', payment.travelDate),
-                  _buildDetailRow('Passengers', '${payment.passengers}'),
-                  _buildDetailRow('Seat Numbers', payment.seatNumbers),
-                  _buildDetailRow('Total Amount', '${payment.totalAmount} RWF'),
-                  _buildDetailRow('Payment Method', payment.paymentMethod),
-                  _buildDetailRow('Payment Status', payment.paymentStatus),
-                  _buildDetailRow('Booking Status', payment.bookingStatus),
-                  if (payment.createdAt != null)
-                    _buildDetailRow('Created At', payment.createdAt!),
-                ],
-              ),
+                );
+                setState(() {
+                  _isLoading = false;
+                });
+              }
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
             ),
-            actions: [
-              TextButton(
-                onPressed: () {
-                  Navigator.pop(context);
-                },
-                child: const Text('Close'),
-              ),
-              if (payment.paymentStatus == 'Pending')
-                ElevatedButton(
-                  onPressed: () {
-                    Navigator.pop(context);
-                    _showApproveDialog(payment);
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.green,
-                  ),
-                  child: const Text('Approve Payment'),
-                ),
-              if (payment.paymentStatus == 'Confirmed')
-                ElevatedButton.icon(
-                  onPressed: () {
-                    Navigator.pop(context);
-                    _showResendConfirmationDialog(payment);
-                  },
-                  icon: const Icon(Icons.email),
-                  label: const Text('Resend Confirmation'),
-                  style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
-                ),
-            ],
+            child: const Text('Confirm Cancellation'),
           ),
-    );
-  }
-
-  Widget _buildDetailRow(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 5),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 120,
-            child: Text(
-              '$label:',
-              style: const TextStyle(fontWeight: FontWeight.bold),
-            ),
-          ),
-          Expanded(child: Text(value)),
         ],
       ),
     );
   }
 
-  void _showResendConfirmationDialog(Booking payment) {
+  // View booking details
+  void _viewBookingDetails(Booking booking) async {
+    // Get user and bus information
+    final user = await _databaseHelper.getUserById(booking.userId);
+    final bus = await _databaseHelper.getBus(booking.busId);
+    
+    if (!mounted) return;
+    
     showDialog(
       context: context,
-      builder:
-          (context) => AlertDialog(
-            title: const Text('Resend Confirmation'),
-            content: const Text(
-              'Do you want to resend the confirmation notification to the user?',
-            ),
-            actions: [
-              TextButton(
-                onPressed: () {
-                  Navigator.pop(context);
-                },
-                child: const Text('Cancel'),
+      builder: (context) => AlertDialog(
+        title: const Text('Booking Details'),
+        content: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Booking info
+              _buildDetailSection('Booking Information', [
+                {'Booking ID': booking.id},
+                {'Status': booking.bookingStatus},
+                {'Date': booking.travelDate},
+                {'Created': _formatDateTime(booking.createdAt)},
+              ]),
+              
+              const Divider(),
+              
+              // Customer info
+              _buildDetailSection('Customer Information', [
+                {'Name': user?.name ?? 'Unknown'},
+                {'Email': user?.email ?? 'Unknown'},
+                {'Phone': user?.phone ?? 'Unknown'},
+              ]),
+              
+              const Divider(),
+              
+              // Bus info
+              _buildDetailSection('Bus Information', [
+                {'Bus': bus?.name ?? booking.busId},
+                {'Route': '${booking.fromLocation} to ${booking.toLocation}'},
+                {'Departure': bus?.departureTime ?? 'Unknown'},
+                {'Seats': booking.seatNumbers},
+                {'Passengers': booking.passengers.toString()},
+              ]),
+              
+              const Divider(),
+              
+              // Payment info
+              _buildDetailSection('Payment Information', [
+                {'Amount': '${booking.totalAmount} RWF'},
+                {'Method': booking.paymentMethod},
+                {'Status': booking.paymentStatus},
+              ]),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+          // Show action buttons based on current status
+          if (booking.bookingStatus == 'Pending') ...[
+            ElevatedButton(
+              onPressed: () {
+                Navigator.pop(context);
+                _confirmBooking(booking.id);
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.green,
               ),
-              ElevatedButton(
-                onPressed: () async {
-                  try {
-                    // Call notification service to send a confirmation notification
-                    // This would typically be handled by your notification service
-                    // For now, we'll just show a success message
+              child: const Text('Approve'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.pop(context);
+                _cancelBooking(booking.id);
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red,
+              ),
+              child: const Text('Reject'),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
 
-                    Navigator.pop(context);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Confirmation notification sent to user'),
-                        backgroundColor: Colors.green,
-                      ),
-                    );
-                  } catch (e) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text('Error sending notification: $e'),
-                        backgroundColor: Colors.red,
-                      ),
-                    );
-                  }
-                },
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
-                child: const Text('Send'),
+  // Helper to build detail sections in the booking details dialog
+  Widget _buildDetailSection(String title, List<Map<String, String>> details) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: const TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: 16,
+          ),
+        ),
+        const SizedBox(height: 10),
+        ...details.map((detail) => Padding(
+          padding: const EdgeInsets.only(bottom: 5),
+          child: Row(
+            children: [
+              Text(
+                '${detail.keys.first}: ',
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              Expanded(
+                child: Text(
+                  detail.values.first,
+                  style: const TextStyle(
+                    color: Colors.black87,
+                  ),
+                ),
               ),
             ],
           ),
+        )),
+        const SizedBox(height: 10),
+      ],
     );
+  }
+
+  // Format date time for display
+  String _formatDateTime(String? dateTimeStr) {
+    if (dateTimeStr == null) return 'Unknown';
+    
+    try {
+      final dateTime = DateTime.parse(dateTimeStr);
+      return '${dateTime.day}/${dateTime.month}/${dateTime.year} ${dateTime.hour}:${dateTime.minute}';
+    } catch (e) {
+      return dateTimeStr;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: PreferredSize(
+        preferredSize: const Size.fromHeight(kToolbarHeight + 50),
+        child: AppBar(
+          title: const Text('Payment Management'),
+          backgroundColor: Colors.blueGrey[800],
+          bottom: TabBar(
+            controller: _tabController,
+            tabs: [
+              Tab(
+                text: 'Pending (${_pendingBookings.length})',
+              ),
+              Tab(
+                text: 'Confirmed (${_confirmedBookings.length})',
+              ),
+              Tab(
+                text: 'Cancelled (${_cancelledBookings.length})',
+              ),
+            ],
+          ),
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.refresh),
+              onPressed: _loadBookings,
+              tooltip: 'Refresh',
+            ),
+          ],
+        ),
+      ),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : TabBarView(
+              controller: _tabController,
+              children: [
+                // Pending bookings
+                _buildBookingList(_pendingBookings),
+                
+                // Confirmed bookings
+                _buildBookingList(_confirmedBookings),
+                
+                // Cancelled bookings
+                _buildBookingList(_cancelledBookings),
+              ],
+            ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: _loadBookings,
+        tooltip: 'Refresh',
+        child: const Icon(Icons.refresh),
+      ),
+    );
+  }
+
+  Widget _buildBookingList(List<Booking> bookings) {
+    return bookings.isEmpty
+        ? const Center(
+            child: Text(
+              'No bookings found',
+              style: TextStyle(fontSize: 16, color: Colors.grey),
+            ),
+          )
+        : ListView.builder(
+            itemCount: bookings.length,
+            itemBuilder: (context, index) {
+              final booking = bookings[index];
+              return FutureBuilder<String>(
+                future: _getUserName(booking.userId),
+                builder: (context, snapshot) {
+                  final userName = snapshot.data ?? 'Loading...';
+                  
+                  return Card(
+                    margin: const EdgeInsets.symmetric(horizontal: 15, vertical: 8),
+                    elevation: 2,
+                    child: ListTile(
+                      title: Text(
+                        'Booking #${booking.id}',
+                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      subtitle: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const SizedBox(height: 5),
+                          Text('Customer: $userName'),
+                          Text('Route: ${booking.fromLocation} to ${booking.toLocation}'),
+                          Text('Date: ${booking.travelDate}'),
+                          Text('Amount: ${booking.totalAmount} RWF'),
+                          Row(
+                            children: [
+                              Container(
+                                margin: const EdgeInsets.only(top: 5),
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: _getStatusColor(booking.bookingStatus),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text(
+                                  booking.bookingStatus,
+                                  style: const TextStyle(color: Colors.white, fontSize: 12),
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Container(
+                                margin: const EdgeInsets.only(top: 5),
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: _getStatusColor(booking.paymentStatus),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text(
+                                  booking.paymentStatus,
+                                  style: const TextStyle(color: Colors.white, fontSize: 12),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.visibility),
+                            tooltip: 'View Details',
+                            onPressed: () => _viewBookingDetails(booking),
+                          ),
+                          if (booking.bookingStatus == 'Pending') ...[
+                            IconButton(
+                              icon: const Icon(Icons.check_circle_outline, color: Colors.green),
+                              tooltip: 'Approve',
+                              onPressed: () => _confirmBooking(booking.id),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.cancel_outlined, color: Colors.red),
+                              tooltip: 'Reject',
+                              onPressed: () => _cancelBooking(booking.id),
+                            ),
+                          ],
+                        ],
+                      ),
+                      isThreeLine: true,
+                      onTap: () => _viewBookingDetails(booking),
+                    ),
+                  );
+                }
+              );
+            },
+          );
+  }
+  
+  // Helper method to get user name
+  Future<String> _getUserName(int userId) async {
+    try {
+      final user = await _databaseHelper.getUserById(userId);
+      return user?.name ?? 'Unknown';
+    } catch (e) {
+      return 'Unknown';
+    }
+  }
+
+  Color _getStatusColor(String status) {
+    switch (status) {
+      case 'Confirmed':
+        return Colors.green;
+      case 'Pending':
+        return Colors.orange;
+      case 'Cancelled':
+        return Colors.red;
+      case 'Refunded':
+        return Colors.purple;
+      default:
+        return Colors.grey;
+    }
   }
 }

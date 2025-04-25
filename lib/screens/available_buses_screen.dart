@@ -70,7 +70,7 @@ class _AvailableBusesScreenState extends State<AvailableBusesScreen> {
         _isLoading = false;
       });
     } catch (e) {
-      print('Error loading buses: $e');
+      debugPrint('Error loading buses: $e');
       setState(() {
         _isLoading = false;
         _allBuses = [];
@@ -117,7 +117,7 @@ class _AvailableBusesScreenState extends State<AvailableBusesScreen> {
         return "${minutes}m";
       }
     } catch (e) {
-      print('Error calculating duration: $e');
+      debugPrint('Error calculating duration: $e');
       return "Unknown";
     }
   }
@@ -142,7 +142,7 @@ class _AvailableBusesScreenState extends State<AvailableBusesScreen> {
 
       return DateTime(2023, 1, 1, hour, minute);
     } catch (e) {
-      print('Error parsing time string: $e');
+      debugPrint('Error parsing time string: $e');
       return DateTime.now(); // Return current time as fallback
     }
   }
@@ -191,7 +191,7 @@ class _AvailableBusesScreenState extends State<AvailableBusesScreen> {
       DateTime t2 = _parseTimeString(time2);
       return t1.compareTo(t2);
     } catch (e) {
-      print('Error comparing times: $e');
+      debugPrint('Error comparing times: $e');
       return 0; // Return equal if comparison fails
     }
   }
@@ -228,7 +228,7 @@ class _AvailableBusesScreenState extends State<AvailableBusesScreen> {
 
       return totalMinutes1.compareTo(totalMinutes2);
     } catch (e) {
-      print('Error comparing durations: $e');
+      debugPrint('Error comparing durations: $e');
       return 0; // Return equal if comparison fails
     }
   }

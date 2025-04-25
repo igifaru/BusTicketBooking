@@ -1,4 +1,3 @@
-// lib/models/ticket.dart
 class Ticket {
   final String id;
   final String busName;
@@ -10,6 +9,10 @@ class Ticket {
   final List<String> seatNumbers;
   final String status;
   final String qrCode;
+  final String userName;
+  final String userEmail;
+  final String userPhone;
+  final int userId; // Add this property
 
   Ticket({
     required this.id,
@@ -22,5 +25,9 @@ class Ticket {
     required this.seatNumbers,
     required this.status,
     required this.qrCode,
+    required this.userName,
+    required this.userEmail,
+    required this.userPhone,
+    required this.userId, // Initialize this property
   });
 }

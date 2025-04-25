@@ -1,6 +1,7 @@
 // lib/main.dart (updated)
 import 'package:flutter/material.dart';
 import 'package:tickiting/screens/welcome_screen.dart';
+import 'package:tickiting/services/auth_service.dart';
 import 'package:tickiting/utils/database_helper.dart';
 import 'package:tickiting/utils/theme.dart';
 import 'package:tickiting/services/notification_service.dart';
@@ -22,6 +23,17 @@ void main() async {
   final notificationService = NotificationService();
   await notificationService.initialize();
 
+    try {
+    final currentUser = await AuthService().getCurrentUser();
+    if (currentUser != null) {
+      debugPrint('===== STARTUP: Current user is ${currentUser.name} (ID: ${currentUser.id}) =====');
+    } else {
+      debugPrint('===== STARTUP: No user is currently logged in =====');
+    }
+  } catch (e) {
+    debugPrint('===== STARTUP: Error checking current user: $e =====');
+  }
+
   runApp(const MyApp());
 }
 
@@ -29,7 +41,7 @@ Future<void> _fixExistingNotifications() async {
   final databaseHelper = DatabaseHelper();
   final db = await databaseHelper.database;
 
-  print("Starting to fix Admin User notifications...");
+  debugPrint("Starting to fix Admin User notifications...");
 
   // First, get all available users to find a suitable replacement
   final users = await databaseHelper.getAllUsers();
@@ -48,7 +60,7 @@ Future<void> _fixExistingNotifications() async {
     whereArgs: ['%Admin User%'],
   );
 
-  print("Found ${notifications.length} notifications to fix");
+  debugPrint("Found ${notifications.length} notifications to fix");
 
   for (var notification in notifications) {
     final int id = notification['id'] as int;
@@ -93,7 +105,9 @@ Future<void> _fixExistingNotifications() async {
               whereArgs: [id],
             );
 
-            print("Fixed notification #$id: '$message' -> '$updatedMessage'");
+            debugPrint(
+              "Fixed notification #$id: '$message' -> '$updatedMessage'",
+            );
           }
         }
       }
@@ -114,7 +128,7 @@ Future<void> _fixExistingNotifications() async {
           whereArgs: [id],
         );
 
-        print(
+        debugPrint(
           "Fixed notification #$id using userId: '$message' -> '$updatedMessage'",
         );
       }
@@ -137,13 +151,13 @@ Future<void> _fixExistingNotifications() async {
         whereArgs: [id],
       );
 
-      print(
+      debugPrint(
         "Fixed notification #$id using default approach: '$message' -> '$updatedMessage'",
       );
     }
   }
 
-  print("Completed fixing Admin User notifications");
+  debugPrint("Completed fixing Admin User notifications");
 
   // Finally, update the Admin User name in the users table
   try {
@@ -153,9 +167,9 @@ Future<void> _fixExistingNotifications() async {
       where: 'name = ? AND email = ?',
       whereArgs: ['Admin User', 'admin@rwandabus.com'],
     );
-    print("Updated admin user name to 'System Administrator'");
+    debugPrint("Updated admin user name to 'System Administrator'");
   } catch (e) {
-    print("Error updating admin user name: $e");
+    debugPrint("Error updating admin user name: $e");
   }
 }
 
